@@ -1,0 +1,132 @@
+#!/usr/bin/perl
+
+# Given ./Tuxemon/, extract faces
+
+use strict;
+use warnings;
+use feature 'signatures';
+use Path::Tiny;
+use Image::Magick;
+use File::Basename qw(basename fileparse);
+use POSIX qw(fmod);
+use Convert::Color::RGB;
+use Convert::Color::HSL;
+
+my $source_dir = '';
+my $dest_dir = "tuxemon-front/";
+
+# XXX
+#goto EXTRACT;
+#goto SHINY;
+goto CONVERT;
+
+# --- extract from repo
+EXTRACT:
+$source_dir = "Tuxemon/mods/tuxemon/gfx/sprites/battle/";
+
+my %front_rectangle = (
+    x      => 0,
+    y      => 0,
+    width  => 64,
+    height => 64,
+);
+
+for my $f (path($source_dir)->children) {
+    print "Extracting from '@{[basename($f)]}'...";
+    my $outname = $dest_dir . basename($f);
+
+    my $image = Image::Magick->new;
+    $image->Read($f);
+    $image->Crop(%front_rectangle);
+    $image->Write($outname);
+
+    print "Done.\n";
+}
+
+# --- generate shiny
+SHINY:
+
+$source_dir = $dest_dir;
+
+my $HUE_SHIFT   = 0.50;   # fraction of a full rotation (0.50 = 180 degrees)
+my $SAT_BOOST   = 1.25;   # multiplier on saturation, clamped to 1.0
+my $LIGHT_CURVE = 0.85;   # exponent on lightness; <1 brightens midtones more than highlights
+
+sub shiny_color ($r, $g, $b) {
+    my $hsl = Convert::Color::RGB->new($r, $g, $b)->convert_to('hsl');
+
+    my $h = fmod($hsl->hue / 360 + $HUE_SHIFT, 1);
+    my $s = $hsl->saturation * $SAT_BOOST;
+    $s = 1 if $s > 1;
+    my $l = $hsl->lightness ** $LIGHT_CURVE;
+
+    my $rgb = Convert::Color::HSL->new($h * 360, $s, $l)->convert_to('rgb');
+    return [ $rgb->rgb ];
+}
+
+sub build_color_map ($img, $width, $height) {
+    my %color_map;   # "r,g,b" (0-1 floats) -> [r,g,b] (0-1 floats)
+
+    for my $y (0 .. $height - 1) {
+        for my $x (0 .. $width - 1) {
+            my ($r, $g, $b) = $img->GetPixel(x => $x, y => $y, normalize => 1);
+            my $key = "$r,$g,$b";
+            next if exists $color_map{$key};
+
+            if (($r == 0 && $g == 0 && $b == 0) || ($r == 1 && $g == 1 && $b == 1)) {
+                $color_map{$key} = [$r, $g, $b];   # exact black/white, untouched
+                next;
+            }
+
+            $color_map{$key} = shiny_color($r, $g, $b);
+        }
+    }
+
+    return \%color_map;
+}
+
+sub apply_color_map ($img, $width, $height, $color_map) {
+    for my $y (0 .. $height - 1) {
+        for my $x (0 .. $width - 1) {
+            my ($r, $g, $b) = $img->GetPixel(x => $x, y => $y, normalize => 1);
+            $img->SetPixel(x => $x, y => $y, color => $color_map->{"$r,$g,$b"}, normalize => 1);
+        }
+    }
+    return;
+}
+
+for my $src_path (path($source_dir)->children(qr/\.png$/)) {
+    print "Generating shiny for '@{[ basename($src_path) ]}'...";
+
+    my ($basename) = fileparse("$src_path", qr/\.png/);
+    my $dest_path  = path($dest_dir)->child("${basename}-shiny.png");
+
+    my $img = Image::Magick->new;
+    my $err = $img->Read("$src_path");
+    if ($err) { warn "Could not read $src_path: $err"; next; }
+
+    my ($width, $height) = $img->Get('columns', 'rows');
+
+    my $color_map = build_color_map($img, $width, $height);
+    apply_color_map($img, $width, $height, $color_map);
+
+    $img->Write("$dest_path");
+
+    print("Done.\n");
+}
+
+# XXX
+exit(0);
+
+# --- convert to ascii
+CONVERT:
+$source_dir = $dest_dir;
+
+for my $f (path($source_dir)->children(qr/\.png$/)) {
+    print "Converting '@{[basename($f)]}'...";
+    (my $outname = $dest_dir . basename($f)) =~ s/png$/ascii/;
+
+    system('img2hbterm ' . $f . ' > ' . $outname);
+
+    print "Done.\n";
+}

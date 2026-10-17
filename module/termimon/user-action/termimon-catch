@@ -1,0 +1,56 @@
+#!/usr/bin/tclsh
+set script_dir [file dirname [file normalize [info script]]]
+set item_dir [file join $script_dir .. item]
+
+proc slurp {filename} {
+    set f [open $filename r]
+    set contents [read $f]
+    close $f
+    return $contents
+}
+
+proc cat {filename} {
+    puts [slurp $filename]
+}
+
+set termimon [exec termventure-get "termimon" "encounter"]
+
+# Find the termimon's .ascii file recursively.
+set sprite ""
+set pending_dirs [list $item_dir]
+
+while {[llength $pending_dirs] > 0} {
+    set dir [lindex $pending_dirs 0]
+    set pending_dirs [lrange $pending_dirs 1 end]
+
+    foreach path [glob -nocomplain -directory $dir *] {
+        if {[file isdirectory $path]} {
+            lappend pending_dirs $path
+        } elseif {[file tail $path] eq "$termimon.ascii"} {
+            set sprite $path
+            break
+        }
+    }
+
+    if {$sprite ne ""} {
+        break
+    }
+}
+
+if {$sprite eq ""} {
+    puts stderr "Could not find sprite for termimon: $termimon"
+    exit 1
+}
+
+puts "\033\[1;32mYou have captured a $termimon!\033\[0m"
+cat $sprite
+
+if {[catch {exec has-item $termimon}]} {
+    exec give-item $termimon
+} else {
+    puts "\033\[1;31m"
+    puts "== ======================== =="
+    puts "== But you already had one! =="
+    puts "== ======================== =="
+    puts "\033\[0m"
+}

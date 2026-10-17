@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+
+use v5.36;
+use FindBin qw($RealBin);
+use DBI;
+use DBD::SQLite::Constants qw(SQLITE_OPEN_READWRITE);
+
+# usage: termventure-set SECTION KEY [VALUE]
+# Without VALUE, it is read from stdin (one trailing newline is dropped),
+# which allows multi-line values.
+
+my $db_path = "$RealBin/../internal/termventure.db";
+
+@ARGV == 2 || @ARGV == 3
+    or do { print STDERR "usage: termventure-set SECTION KEY [VALUE]\n"; exit 64 };
+my ($section, $key, $value) = @ARGV;
+
+unless (defined $value) {
+    local $/;
+    $value = <STDIN> // '';
+    $value =~ s/\n\z//;
+}
+
+# Never create the database: it belongs to the daemon.
+my $dbh = eval {
+    -f $db_path or die "no registry\n";
+    my $h = DBI->connect("dbi:SQLite:dbname=$db_path", '', '', {
+        RaiseError => 1, PrintError => 0, AutoCommit => 1,
+        sqlite_open_flags => SQLITE_OPEN_READWRITE,
+    });
+    $h->sqlite_busy_timeout(5000);
+    $h;
+} or do {
+    print STDERR "termventure-set: registry unavailable (is the daemon running?)\n";
+    exit 2;
+};
+
+# One atomic statement: concurrent writers are serialised by SQLite,
+# the last one wins, and a value is never stored half-written.
+eval {
+    $dbh->do(<<'SQL', undef, $section, $key, $value);
+INSERT INTO registry (section, key, value) VALUES (?, ?, ?)
+ON CONFLICT (section, key) DO UPDATE SET value = excluded.value
+SQL
+    1;
+} or do {
+    print STDERR "termventure-set: write failed\n";
+    exit 3;
+};

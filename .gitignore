@@ -1,0 +1,4 @@
+inventory.list
+*.db
+*.log
+module/termimon/item/pokemon/

@@ -1,0 +1,8 @@
+#!/usr/bin/perl
+
+use FindBin qw($Bin);
+use File::Slurp qw(read_file);
+
+my $inventory_file = "$Bin/inventory.list";
+
+print read_file($inventory_file);

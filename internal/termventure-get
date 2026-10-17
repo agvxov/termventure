@@ -1,0 +1,41 @@
+#!/usr/bin/perl
+
+use v5.36;
+use FindBin qw($RealBin);
+use DBI;
+use DBD::SQLite::Constants qw(SQLITE_OPEN_READWRITE);
+
+# usage: termventure-get SECTION KEY
+# Prints the value. Exit status: 0 found, 1 not found, 2 registry unavailable.
+
+my $db_path = "$RealBin/../internal/termventure.db";
+
+@ARGV == 2
+    or do { print STDERR "usage: termventure-get SECTION KEY\n"; exit 64 };
+my ($section, $key) = @ARGV;
+
+my $dbh = eval {
+    -f $db_path or die "no registry\n";
+    my $h = DBI->connect("dbi:SQLite:dbname=$db_path", '', '', {
+        RaiseError => 1, PrintError => 0, AutoCommit => 1,
+        sqlite_open_flags => SQLITE_OPEN_READWRITE,
+    });
+    $h->sqlite_busy_timeout(5000);
+    $h;
+} or do {
+    print STDERR "termventure-get: registry unavailable (is the daemon running?)\n";
+    exit 2;
+};
+
+my ($value) = eval {
+    $dbh->selectrow_array(
+        'SELECT value FROM registry WHERE section = ? AND key = ?',
+        undef, $section, $key);
+};
+if ($@) {
+    print STDERR "termventure-get: read failed\n";
+    exit 2;
+}
+
+defined $value or exit 1;
+print $value, "\n";

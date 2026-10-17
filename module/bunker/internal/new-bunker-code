@@ -1,0 +1,29 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib $Bin;
+use Bunker qw(load_codes save_codes random_bunker_code pretty_code max_simultaneous);
+
+my $code = random_bunker_code(rand());
+
+my $old_codes = load_codes();
+my @new_codes = @$old_codes;
+
+# Make room: keep at most (max_simultaneous - 1) existing codes,
+# dropping the oldest (first in file order) ones until there's
+# space for the new one.
+my $max  = max_simultaneous();
+my $keep = $max - 1;
+$keep = 0 if $keep < 0;
+shift @new_codes while @new_codes > $keep;
+
+# New id = smallest positive integer not currently in use.
+my %used = map { $_->{id} => 1 } @new_codes;
+my $new_id = 1;
+$new_id++ while $used{$new_id};
+
+push @new_codes, { id => $new_id, code => $code };
+save_codes(\@new_codes);
+
+print pretty_code($new_id, $code), "\n";

@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+use FindBin qw($Bin);
+use lib $Bin;
+use File::Slurp qw(read_file append_file);
+
+my $inventory_file = "$Bin/inventory.list";
+my $sprite_folder  = "$Bin/sprite-data/";
+my $sprite_width   = 32;
+
+my $item = $ARGV[0] or exit 1;
+
+append_file($inventory_file, "$item:\n")
+    or die "Could not append to '$inventory_file': $!";
+
+my $sprite;
+
+my $sprite_path = "$sprite_folder/$item.ascii";
+
+if (-e $sprite_path) {
+    $sprite = read_file($sprite_path);
+} else {
+    my $undefined_path = "${sprite_folder}/undefined.ascii";
+    if (-e $undefined_path) {
+        $sprite = read_file($undefined_path);
+    } else {
+        $sprite = '';
+    }
+}
+
+# center sprite to message
+my $message = "A '$item' has been added to your inventory!";
+my $message_length = length($message);
+my $pad_amount = int(($message_length - $sprite_width) / 2);
+$pad_amount = 0 if $pad_amount < 0;
+my $padding = ' ' x $pad_amount;
+
+if (length $sprite) {
+    chomp $sprite;
+    $sprite = join("\n", map { "$padding$_" } split(/\n/, $sprite, -1));
+    $sprite .= "\n";
+}
+
+print $sprite;
+print "\e[1;32m$message\e[0m\n";

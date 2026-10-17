@@ -1,0 +1,28 @@
+#!/usr/bin/tclsh
+set script_dir [file dirname [file normalize [info script]]]
+set item_dir [file join $script_dir .. item]
+
+proc find_ascii {dir} {
+    set results [glob -nocomplain -directory $dir -types f *.ascii]
+
+    foreach subdir [glob -nocomplain -directory $dir -types d *] {
+        lappend results {*}[find_ascii $subdir]
+    }
+
+    return $results
+}
+
+set termimons {}
+foreach p [find_ascii $item_dir] {
+    lappend termimons [file rootname [file tail $p]]
+}
+
+set termimons [lsearch -all -inline -not -glob $termimons *-shiny*]
+
+set termimon [lindex $termimons [expr {int(rand() * [llength $termimons])}]]
+if {int(rand() * 128) == 0} {
+    set termimon "$termimon-shiny"
+}
+
+exec termventure-set "termimon" "encounter" $termimon
+puts "\033\[1;33m\[A wild termimon appears\]"
