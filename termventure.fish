@@ -30,7 +30,7 @@ function swp_poll
         return
     end
 
-    set PATH "$TERMVENTURE_PATH:$PATH"
+    set --local PATH "$TERMVENTURE_PATH:$PATH"
 
     for line in $script
         switch (string sub -l 1 -- $line)

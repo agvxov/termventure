@@ -85,7 +85,7 @@ sub push_line(@cmds) {
 # Append every user-action/ to $PATH
 sub make_path() {
     my @dirs = grep { -d } (
-        "$dirname/bin",
+        "$dirname/user-action",
         map { "$dirname/module/$_/user-action" } @modules,
     );
     return '' unless @dirs;

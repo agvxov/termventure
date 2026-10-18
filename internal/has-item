@@ -6,5 +6,5 @@ use File::Slurp qw(read_file);
 my $inventory_file = "$Bin/inventory.list";
 my $item = $ARGV[0] or exit 1;
 
-exit 0 if grep { $_ eq "$item:" } split /\n/, read_file($inventory_file);
+exit 0 if grep { $_ eq "$item" } split /\n/, read_file($inventory_file);
 exit 1;
