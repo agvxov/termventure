@@ -67,3 +67,7 @@ function __swp_postexec --on-event fish_postexec
     swp_bump
     swp_poll
 end
+
+function god-mode
+    set --global --export PATH "$TERMVENTURE_PATH:$PATH"
+end
