@@ -1,0 +1,85 @@
+#!/usr/bin/perl
+
+# Try one of your codes on the door.
+# Win or lose, a bunker only gets tried once: the code is burned and the door is gone.
+use strict;
+use warnings;
+use feature 'signatures';
+use FindBin qw($RealBin);
+use lib "$RealBin/../internal";
+use POSIX ();
+use Term::ReadLine;
+use Bunker qw(
+    codes_load codes_save
+    encounter_active encounter_clear
+    loot_table normalize_code
+);
+
+encounter_active() or exit 1;
+
+my $codes = codes_load();
+
+if (!@$codes) {
+    encounter_clear();
+    print "\e[33mThe door has no keyhole you recognize. You'll need a code first.\e[0m\n";
+    exit 0;
+}
+
+sub give_loot() {
+    my @command = loot_table();
+
+    my $pid = open(my $fh, '-|') // do { warn "bunker: cannot fork: $!\n"; return };
+    if (!$pid) {
+        exec { $command[0] } @command
+            or print STDERR "bunker: cannot run the loot-table command '$command[0]': $!\n";
+        POSIX::_exit(127);
+    }
+    my $item = do { local $/; <$fh> } // '';
+    close $fh;
+    if ($?) {
+        warn "bunker: the loot-table command failed\n";
+        return;
+    }
+
+    $item =~ s/\A\s+|\s+\z//g;
+    return unless length $item;
+    system('give-item', $item);
+}
+
+sub load_sprite($name, $id) {
+    open my $fh, '<', "$RealBin/../sprite/$name"
+        or die "bunker: cannot read sprite $name: $!\n";
+    my $sprite = do { local $/; <$fh> };
+    $sprite =~ s/%/$id/g;
+    return $sprite;
+}
+
+# Pick one of the codes you are carrying and burn it immediately.
+my $idx = int rand @$codes;
+my ($id, $code) = @{ $codes->[$idx] };
+
+my $closed_sprite = load_sprite('bunker-door-closed.ascii', $id);
+my $locked_sprite = load_sprite('bunker-door-locked.ascii', $id);
+my $open_sprite   = load_sprite('bunker-door-open.ascii',   $id);
+
+splice @$codes, $idx, 1;
+codes_save($codes);
+
+print $closed_sprite;
+
+my $term  = Term::ReadLine->new('');
+my $guess = $term->readline('The bunker door asks for a code: ');
+$guess = '' unless defined $guess;
+chomp $guess;
+
+encounter_clear();
+
+if (normalize_code($guess) eq normalize_code($code)) {
+    print $open_sprite;
+    print "\e[32mYou managed to open the bunker! :)\e[0m\n";
+    give_loot();
+} else {
+    print $locked_sprite;
+    print "\e[31mThe bunker has shut itself forever.\e[0m\n";
+    exit 1;
+}

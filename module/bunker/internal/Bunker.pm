@@ -1,99 +1,163 @@
 package Bunker;
 
+# Shared code of the bunker module.
+#
+# Registry state:
+#   codes      list literal of [id, code] pairs, oldest first,
+#              e.g. [[2,'X7Q'],[1,'A0Z']]
+#   paper      the [id, code] pair on the piece of paper that drifted by,
+#              until somebody reads it
+#   encounter  "true" while a door waits to be visited
 use strict;
 use warnings;
 use feature 'signatures';
 use Exporter 'import';
-use MIME::Base64 qw(encode_base64 decode_base64);
-use File::BaseDir qw(xdg_cache_home);
-use File::Path qw(make_path);
-use File::Slurp qw(read_file write_file);
+use Safe;
+use Text::ParseWords qw(shellwords);
 
 our @EXPORT_OK = qw(
-    cache_file_path
-    load_codes
-    save_codes
-    decode_bunker_codes
-    encode_bunker_codes
-    random_bunker_code
-    pretty_code
-    code_length
-    max_simultaneous
+    codes_load codes_save
+    paper_load paper_save paper_clear
+    encounter_active encounter_set encounter_clear
+    max_concurrent code_size code_alphabet loot_table
+    random_code pretty_code normalize_code
 );
 
-sub code_length() {
-    return $ENV{BUNKER_CODE_LENGHT} // 3;
+# -- Registry
+# Exit status of termventure-get: 0 found, 1 not found, 2 registry unavailable.
+sub reg_get($key) {
+    open my $fh, '-|', 'termventure-get', 'bunker', $key
+        or die "bunker: cannot run termventure-get: $!\n";
+    my $value = do { local $/; <$fh> } // '';
+    close $fh;
+    my $status = $? >> 8;
+    return undef if $status == 1;
+    die "bunker: registry unavailable (is the daemon running?)\n" if $status;
+    $value =~ s/\n\z//;
+    return $value;
 }
 
-sub max_simultaneous() {
-    return $ENV{BUNKER_CODE_MAX_SIMULTANIOUS} // 3;
+sub reg_set($key, $value) {
+    system('termventure-set', 'bunker', $key, $value) == 0
+        or die "bunker: cannot write '$key' to the registry\n";
 }
 
-sub cache_file_path() {
-    my $dir = xdg_cache_home() . '/bunker';
-    make_path($dir) unless -d $dir;
-    return "$dir/bunker-codes";
+# -- Literals
+# Registry values are plain Perl literals, like the triggers.
+# Codes are always quoted strings.
+sub quote($text) {
+    $text =~ s/([\\'])/\\$1/g;
+    return "'$text'";
 }
 
-# Lines look like:
-#   1: ZXhhbXBsZQo=
-# The number is an id, not a line number -- ids are reused (the
-# smallest available integer is handed out each time), so they
-# don't necessarily stay in numeric order as codes come and go.
-# What *is* meaningful is file order: codes are only ever appended,
-# so line order == age order, oldest first.
-sub decode_bunker_codes($lines) {
-    my @codes;
-    for my $line (@$lines) {
-        chomp $line;
-        next unless length $line;
-        next unless $line =~ /^\s*(\d+)\s*:\s*(\S+)\s*$/;
-        my ($id, $b64) = ($1, $2);
-        push @codes, { id => $id, code => decode_base64($b64) };
+sub pair_literal($pair) {
+    return sprintf '[%d,%s]', $pair->[0], quote($pair->[1]);
+}
+
+sub decode($text) {
+    my $data = Safe->new->reval($text);
+    return $@ ? undef : $data;
+}
+
+sub is_pair($pair) {
+    return ref $pair eq 'ARRAY'
+        && @$pair == 2
+        && defined $pair->[0] && !ref $pair->[0] && $pair->[0] =~ /\A[1-9][0-9]*\z/
+        && defined $pair->[1] && !ref $pair->[1] && length $pair->[1];
+}
+
+# -- Codes
+sub codes_load() {
+    my $text = reg_get('codes');
+    return [] unless defined $text && length $text;
+
+    my $list = decode($text);
+    unless (ref $list eq 'ARRAY') {
+        warn "bunker: ignoring malformed codes\n";
+        return [];
     }
-    return \@codes;
+    return [ grep { is_pair($_) } @$list ];
 }
 
-sub encode_bunker_codes($codes) {
-    my @lines;
-    for my $entry (@$codes) {
-        push @lines, sprintf("%d: %s\n", $entry->{id}, encode_base64($entry->{code}, ''));
+sub codes_save($codes) {
+    reg_set('codes', '[' . join(',', map { pair_literal($_) } @$codes) . ']');
+}
+
+# -- Paper
+sub paper_load() {
+    my $text = reg_get('paper');
+    return undef unless defined $text && length $text;
+    my $pair = decode($text);
+    return is_pair($pair) ? $pair : undef;
+}
+
+sub paper_save($pair) {
+    reg_set('paper', pair_literal($pair));
+}
+
+sub paper_clear() {
+    reg_set('paper', '');
+}
+
+# -- Encounter
+sub encounter_active() {
+    return (reg_get('encounter') // '') eq 'true';
+}
+
+sub encounter_set() {
+    reg_set('encounter', 'true');
+}
+
+sub encounter_clear() {
+    reg_set('encounter', '');
+}
+
+# -- Configuration
+# Anything missing or unusable falls back to the defaults of bunker.ini.
+sub conf_uint($key, $min, $default) {
+    my $value = reg_get($key);
+    return defined $value && $value =~ /\A[0-9]+\z/ && $value >= $min
+        ? $value + 0
+        : $default;
+}
+
+sub max_concurrent() { return conf_uint('max-concurrent', 0, 3) }
+sub code_size()      { return conf_uint('code-size',      1, 3) }
+
+sub code_alphabet() {
+    my $value = reg_get('code-alphabet') // '';
+    $value =~ s/\A"(.*)"\z/$1/s;        # the ini quotes it
+    return length $value ? $value : join '', 'A' .. 'Z', 0 .. 9;
+}
+
+sub loot_table() {
+    my $value = reg_get('loot-table') // '';
+    return ('echo', 'stone') unless $value =~ /\S/;
+
+    my @words = shellwords($value);
+    unless (@words) {
+        warn "bunker: unusable loot-table '$value', using the default\n";
+        return ('echo', 'stone');
     }
-    return \@lines;
+    return @words;
 }
 
-sub load_codes() {
-    my $file = cache_file_path();
-    return [] unless -e $file;
-    my @lines = read_file($file);
-    return decode_bunker_codes(\@lines);
-}
-
-sub save_codes($codes) {
-    my $file  = cache_file_path();
-    my $lines = encode_bunker_codes($codes);
-    write_file($file, @$lines);
-}
-
-my @ALPHABET = ('A' .. 'Z', '0' .. '9');
-
-sub random_bunker_code($seed) {
-    # XXX
-    # $seed is typically the result of perl's own rand() (a float in
-    # [0, 1)), passed in from the caller. srand() truncates its
-    # argument to an integer, so seeding it directly would collapse
-    # every call to srand(0) -- scale it up first so the fractional
-    # part actually matters.
-    srand(int($seed * 1_000_000_000)) if defined $seed;
-    my $len  = code_length();
-    my $code = '';
-    $code .= $ALPHABET[int(rand(scalar @ALPHABET))] for 1 .. $len;
-    return $code;
+# -- Codes as text
+sub random_code() {
+    my @alphabet = split //, code_alphabet();
+    return join '', map { $alphabet[int rand @alphabet] } 1 .. code_size();
 }
 
 sub pretty_code($id, $code) {
-    my $dashed = join('-', unpack('(A3)*', $code));
+    my $dashed = join '-', unpack '(A3)*', $code;
     return "\e[35m###\e[0m: \e[1m${id}\e[0m|${dashed}";
+}
+
+# What a player types is compared with the code after this: dashes do not
+# count and neither does case.
+sub normalize_code($text) {
+    $text =~ s/-//g;
+    return uc $text;
 }
 
 1;

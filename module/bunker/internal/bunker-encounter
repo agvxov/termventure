@@ -1,0 +1,11 @@
+#!/usr/bin/perl
+
+# A door is found in the mountainside. It waits until visit-bunker.
+use strict;
+use warnings;
+use FindBin qw($RealBin);
+use lib $RealBin;
+use Bunker qw(encounter_set);
+
+encounter_set();
+print "\e[1;33m[You find a strange door in the mountainside]\e[0m\n";

@@ -1,0 +1,14 @@
+#!/usr/bin/perl
+
+# Read the piece of paper following a paper-encounter.
+# It can only be read once.
+use strict;
+use warnings;
+use FindBin qw($RealBin);
+use lib "$RealBin/../internal";
+use Bunker qw(paper_load paper_clear pretty_code);
+
+my $paper = paper_load() or exit 1;
+
+print pretty_code(@$paper), "\n";
+paper_clear();
