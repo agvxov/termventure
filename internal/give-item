@@ -3,34 +3,60 @@
 use strict;
 use warnings;
 use feature 'signatures';
-no warnings 'experimental::signatures';
 use FindBin qw($Bin);
 use lib $Bin;
+use Cwd qw(abs_path);
+use File::Find ();
+use File::Glob qw(bsd_glob);
 use File::Slurp qw(read_file append_file);
 
+my $root           = abs_path("$Bin/..");
 my $inventory_file = "$Bin/inventory.list";
-my $sprite_folder  = "$Bin/sprite-data/";
 my $sprite_width   = 32;
 
-my $item = $ARGV[0] or exit 1;
+# usage: give-item NAME
+#        give-item NAME#{DATA}
+#
+# NAME is [-A-Za-z0-9]+, see the inventory section of the developer docs.
+# The syntax inside the braces is the owner module's business and is not checked.
+@ARGV == 1 or do { print STDERR "usage: give-item NAME[#{DATA}]\n"; exit 64 };
+my $arg = $ARGV[0];
 
-append_file($inventory_file, "$item:\n")
-    or die "Could not append to '$inventory_file': $!";
+my ($item) = $arg =~ /\A([-A-Za-z0-9]+)(?:#\{.*\})?\z/
+    or do {
+        print STDERR "give-item: invalid item '$arg', expected NAME or NAME#{...}\n";
+        exit 1;
+    };
 
-my $sprite;
-
-my $sprite_path = "$sprite_folder/$item.ascii";
-
-if (-e $sprite_path) {
-    $sprite = read_file($sprite_path);
-} else {
-    my $undefined_path = "${sprite_folder}/undefined.ascii";
-    if (-e $undefined_path) {
-        $sprite = read_file($undefined_path);
-    } else {
-        $sprite = '';
-    }
+# Cure item/ and ALL module item/, recursively.
+# Disabling a module does not revoke its items.
+sub item_dirs() {
+    return grep { -d } (
+        "$root/item",
+        sort(bsd_glob("$root/module/*/item")),
+    );
 }
+
+sub find_sprite($name) {
+    my $found;
+    for my $dir (item_dirs()) {
+        File::Find::find({
+            no_chdir => 1,
+            wanted   => sub {
+                return if defined $found;
+                $found = $_ if -f $_ && m{/\Q$name\E\.ascii\z};
+            },
+        }, $dir);
+        last if defined $found;
+    }
+    return $found;
+}
+
+append_file($inventory_file, "$arg\n")
+    or die "Append operation failed for '$inventory_file': $!";
+
+my $sprite_path = find_sprite($item) // find_sprite('undefined');
+my $sprite      = defined $sprite_path ? read_file($sprite_path) : '';
 
 # center sprite to message
 my $message = "A '$item' has been added to your inventory!";

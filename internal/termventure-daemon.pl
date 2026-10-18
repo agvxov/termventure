@@ -97,7 +97,7 @@ sub make_path() {
 #  before events are evaluated by the shell.
 sub make_internal_path() {
     my @dirs = grep { -d } (
-        "$dirname/bin",
+        "$dirname/internal",
         map { "$dirname/module/$_/internal" } @modules,
     );
     return '' unless @dirs;
