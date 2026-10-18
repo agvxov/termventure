@@ -1,10 +1,40 @@
 #!/usr/bin/perl
 
+use strict;
+use warnings;
 use FindBin qw($Bin);
 use File::Slurp qw(read_file);
 
 my $inventory_file = "$Bin/inventory.list";
-my $item = $ARGV[0] or exit 1;
 
-exit 0 if grep { $_ eq "$item" } split /\n/, read_file($inventory_file);
+# usage: has-item NAME
+#        has-item NAME#{DATA}
+#
+# Exit status: 0 owned, 1 not owned, 64 usage, 65 malformed item.
+#
+# NAME alone matches any item of that name, whatever metadata it carries.
+# NAME#{DATA} matches only an item whose metadata is exactly DATA.
+@ARGV == 1 or do { print STDERR "usage: has-item NAME[#{DATA}]\n"; exit 64 };
+my $item = $ARGV[0];
+
+$item =~ /\A[-A-Za-z0-9]+(?:#\{.*\})?\z/ or do {
+    print STDERR "has-item: invalid item '$item', expected NAME or NAME#{...}\n";
+    exit 65;
+};
+
+if (! -e $inventory_file) {
+    print STDERR "has-item: inventory file not found\n";
+    exit 1;
+}
+
+my $with_data = index($item, '#') >= 0;
+
+for my $line (read_file($inventory_file, chomp => 1)) {
+    if ($with_data) {
+        exit 0 if $line eq $item;
+    } else {
+        # a name cannot contain '#', so "NAME#" cannot match a longer name
+        exit 0 if $line eq $item || index($line, "$item#") == 0;
+    }
+}
 exit 1;
