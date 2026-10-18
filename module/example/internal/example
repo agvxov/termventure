@@ -1,0 +1,2 @@
+#!/bin/sh
+echo -e "\033[1;35mHello $(termventure-get example name)!"
