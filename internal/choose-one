@@ -1,0 +1,22 @@
+#!/usr/bin/perl
+
+# choose-one - echo one of the arguments at random
+#
+# This is a loot-table script for Termventure.
+# In Termventure, random loot is descided by the output of a script.
+# choose-one is a useful minimal representation of how such script is indended to be defined.
+# Since it chooses one of the arguments, the configuration where its placed
+#  becomes quite easy to understand and modify:
+# 
+#    loot-table = choose-one rock stick
+#
+# Have more like this, prefer to avoid `make-quoka-module-loot.pl` if possible.
+
+use v5.36;
+
+@ARGV or do {
+    print STDERR "usage: choose-one ITEM...\n";
+    exit 64;
+};
+
+say $ARGV[int rand @ARGV];
