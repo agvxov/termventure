@@ -44,13 +44,19 @@ end
 
 # --- daemon lifecycle ------------------------------------------------------
 
-if not test -S $__swp_sock
+# A socket file can outlive its daemon (SIGKILL, crash, power loss).
+# Bump is a safe noop.
+function __swp_alive
+    printf '<\n' | socat -T 1 - UNIX-CONNECT:$__swp_sock >/dev/null 2>&1
+end
+
+if not __swp_alive
     # launch and detach
     $path/internal/termventure-daemon.pl </dev/null >/dev/null 2>&1 &
     disown $last_pid
 
     for i in (seq 40)
-        test -S $__swp_sock; and break
+        __swp_alive; and break
         sleep 0.01
     end
 end
